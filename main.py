@@ -142,27 +142,46 @@ class MainWindow(QMainWindow):
             self.resultsText.append("Аппроксимация слабая.")
 
         # График
-        self.canvas.axes.clear()
-        self.canvas.axes.scatter(self.X, self.Y, label='Данные')
-        xline = np.linspace(self.X.min(), self.X.max(), 200)
-        dx = (self.X.max() - self.X.min()) * 0.05
-        self.canvas.axes.set_xlim(self.X.min() - dx, self.X.max() + dx)
-        for key, label in FUNC_TYPES:
-            coeff, phi, S, R2, r = results[key]
-            if key == 'Linear':
-                yline = coeff[0] * xline + coeff[1]
-            elif key.startswith('Polynomial'):
-                yline = np.polyval(coeff, xline)
-            elif key == 'Exponential':
-                yline = coeff[0] * np.exp(coeff[1] * xline)
-            elif key == 'Logarithmic':
-                yline = coeff[0] + coeff[1] * np.log(xline)
-            else:
-                yline = coeff[0] * xline ** coeff[1]
-            self.canvas.axes.plot(xline, yline, label=label)
-        self.canvas.axes.legend()
-        self.canvas.axes.grid(True)
-        self.canvas.draw()
+        try:
+            self.canvas.axes.clear()
+            x_list = list(self.X)
+            y_list = list(self.Y)
+            self.canvas.axes.scatter(x_list, y_list, label='Данные')
+
+            x_min, x_max = min(x_list), max(x_list)
+            dx = (x_max - x_min) * 0.05 if x_max != x_min else 1
+            x_vals = [x_min + i * (x_max - x_min) / 199 for i in range(200)]
+            self.canvas.axes.set_xlim(x_min - dx, x_max + dx)
+
+            for key, label in FUNC_TYPES:
+                coeff, _, _, _, _ = results[key]
+                y_vals = []
+                if key == 'Linear':
+                    a, b = coeff
+                    y_vals = [a * x + b for x in x_vals]
+                elif key in ('Polynomial2', 'Polynomial3'):
+                    for x in x_vals:
+                        val = 0
+                        for j, c in enumerate(coeff):
+                            val += c * (x ** j)
+                        y_vals.append(val)
+                elif key == 'Exponential':
+                    a, b = coeff
+                    y_vals = [a * math.exp(b * x) for x in x_vals]
+                elif key == 'Logarithmic':
+                    a, b = coeff
+                    y_vals = [a + b * math.log(x) if x > 0 else None for x in x_vals]
+                else:
+                    a, b = coeff
+                    y_vals = [a * (x ** b) for x in x_vals]
+
+                self.canvas.axes.plot(x_vals, y_vals, label=label)
+
+            self.canvas.axes.legend()
+            self.canvas.axes.grid(True)
+            self.canvas.draw()
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка графика', str(e))
 
 
 if __name__ == '__main__':
