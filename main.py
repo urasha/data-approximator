@@ -1,15 +1,16 @@
 import sys
 import math
 import numpy as np
-import matplotlib
-
-matplotlib.use('Qt5Agg')
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTextEdit, QPushButton, QFileDialog,
-    QLabel, QMessageBox
+    QTextEdit, QLineEdit, QPushButton, QFileDialog,
+    QLabel, QMessageBox, QHeaderView, QTableWidget, QTableWidgetItem
+)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from approx_funcs import (
+    linear_approx, poly_approx, exponential_approx,
+    log_approx, power_approx
 )
 
 FUNC_TYPES = [
@@ -35,21 +36,18 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Аппроксимация данных")
         self.setGeometry(100, 100, 1200, 700)
-
-        self.X = np.array([])
-        self.Y = np.array([])
-        self.results = {}
+        self.X = []
+        self.Y = []
         self.initUI()
 
     def initUI(self):
         main = QWidget()
-        root = QHBoxLayout()
+        hl = QHBoxLayout()
 
-        # Левая панель
         left = QVBoxLayout()
-        left.addWidget(QLabel('Введите данные (минимум 7 и максимум 12 строк), формат: x y'))
+        left.addWidget(QLabel('Введите данные (минимум 7 и максимум 12):'))
         self.inputText = QTextEdit()
-        self.inputText.setPlaceholderText('Пример:\n1.0 2.1\n2.0 3.5\n...')
+        self.inputText.setPlaceholderText('x y\nпример:\n1.0 2.1\n2.0 3.5\n...')
         left.addWidget(self.inputText)
 
         btns = QHBoxLayout()
@@ -62,37 +60,33 @@ class MainWindow(QMainWindow):
         left.addLayout(btns)
 
         left.addWidget(QLabel('Результаты:'))
-        self.textRes = QTextEdit()
-        self.textRes.setReadOnly(True)
-        left.addWidget(self.textRes)
+        self.resultsText = QTextEdit()
+        self.resultsText.setReadOnly(True)
+        left.addWidget(self.resultsText)
 
-        # Правая панель: график
         right = QVBoxLayout()
         self.canvas = MplCanvas(self, width=6, height=5, dpi=100)
         right.addWidget(self.canvas)
 
-        root.addLayout(left, 3)
-        root.addLayout(right, 5)
-        main.setLayout(root)
+        hl.addLayout(left, 3)
+        hl.addLayout(right, 5)
+        main.setLayout(hl)
         self.setCentralWidget(main)
 
     def load_file(self):
-        fname, _ = QFileDialog.getOpenFileName(self, 'Открыть файл', '', 'Текстовые файлы (*.txt *.csv)')
-        if not fname:
-            return
-        try:
-            data = np.loadtxt(fname)
-            if data.ndim != 2 or data.shape[1] < 2:
-                raise ValueError('Неверный формат файла')
-            lines = [f"{row[0]} {row[1]}" for row in data]
-            self.inputText.setPlainText("\n".join(lines))
-        except Exception as e:
-            QMessageBox.critical(self, 'Ошибка', f'Не удалось загрузить: {e}')
+        fname, _ = QFileDialog.getOpenFileName(self, 'Открыть файл данных', '', 'Текстовые файлы (*.txt *.csv)')
+        if fname:
+            try:
+                data = [line.strip().split() for line in open(fname) if line.strip()]
+                lines = [f"{x} {y}" for x, y in data]
+                self.inputText.setPlainText("\n".join(lines))
+            except Exception as e:
+                QMessageBox.critical(self, 'Ошибка', f'Ошибка загрузки: {e}')
 
-    def parse_input(self):
-        lines = self.inputText.toPlainText().splitlines()
+    def calculate(self):
+        # Разбор ввода
         xs, ys = [], []
-        for line in lines:
+        for line in self.inputText.toPlainText().splitlines():
             parts = line.strip().split()
             if len(parts) >= 2:
                 try:
@@ -100,105 +94,72 @@ class MainWindow(QMainWindow):
                     ys.append(float(parts[1].replace(',', '.')))
                 except:
                     pass
-        return np.array(xs), np.array(ys)
+        self.X = np.array(xs);
+        self.Y = np.array(ys)
 
-    def calculate(self):
-        self.X, self.Y = self.parse_input()
         N = len(self.X)
         if N < 7 or N > 12:
-            QMessageBox.warning(self, 'Ошибка', 'Требуется от 7 до 12 точек!')
+            QMessageBox.warning(self, 'Ошибка', 'Должно быть от 7 до 12 точек!')
             return
-        self.results.clear()
-        S_tot = np.sum((self.Y - np.mean(self.Y)) ** 2)
 
-        # Линейная
-        a1, b1 = np.polyfit(self.X, self.Y, 1)
-        phi1 = a1 * self.X + b1
-        S1 = np.sum((phi1 - self.Y) ** 2)
-        r = np.corrcoef(self.X, self.Y)[0, 1]
-        R2_1 = 1 - S1 / S_tot
-        self.results['Linear'] = dict(coeff=[a1, b1], phi=phi1, S=S1, r=r, R2=R2_1)
+        results = {}
 
-        # Полином 2-го порядка
-        p2 = np.polyfit(self.X, self.Y, 2)
-        phi2 = np.polyval(p2, self.X)
-        S2 = np.sum((phi2 - self.Y) ** 2)
-        self.results['Polynomial2'] = dict(coeff=p2, phi=phi2, S=S2, R2=1 - S2 / S_tot)
+        c1, phi1, S1, R21, r1 = linear_approx(self.X, self.Y)
+        results['Linear'] = (c1, phi1, S1, R21, r1)
 
-        # Полином 3-го порядка
-        p3 = np.polyfit(self.X, self.Y, 3)
-        phi3 = np.polyval(p3, self.X)
-        S3 = np.sum((phi3 - self.Y) ** 2)
-        self.results['Polynomial3'] = dict(coeff=p3, phi=phi3, S=S3, R2=1 - S3 / S_tot)
+        c2, phi2, S2, R22 = poly_approx(self.X, self.Y, 2)
+        results['Polynomial2'] = (c2, phi2, S2, R22, None)
+        c3, phi3, S3, R23 = poly_approx(self.X, self.Y, 3)
+        results['Polynomial3'] = (c3, phi3, S3, R23, None)
 
-        # Экспоненциальная y=a·e^(b·x)
-        mask = self.Y > 0
-        xa, ya = self.X[mask], np.log(self.Y[mask])
-        ba, la = np.polyfit(xa, ya, 1)
-        a_exp = math.exp(la)
-        phi_exp = a_exp * np.exp(ba * self.X)
-        Se = np.sum((phi_exp - self.Y) ** 2)
-        self.results['Exponential'] = dict(coeff=[a_exp, ba], phi=phi_exp, S=Se, R2=1 - Se / S_tot)
+        ce, phie, Se, R2e = exponential_approx(self.X, self.Y)
+        results['Exponential'] = (ce, phie, Se, R2e, None)
 
-        # Логарифмическая y=a + b·ln(x)
-        mask2 = self.X > 0
-        xb, yb = np.log(self.X[mask2]), self.Y[mask2]
-        bb, a_log = np.polyfit(xb, yb, 1)
-        phi_log = a_log + bb * np.log(self.X)
-        Sl = np.sum((phi_log - self.Y) ** 2)
-        self.results['Logarithmic'] = dict(coeff=[a_log, bb], phi=phi_log, S=Sl, R2=1 - Sl / S_tot)
+        cl, phil, Sl, R2l = log_approx(self.X, self.Y)
+        results['Logarithmic'] = (cl, phil, Sl, R2l, None)
 
-        # Степенная y=a·x^b
-        xc, yc = np.log(self.X[mask2]), np.log(self.Y[mask2])
-        bc, la2 = np.polyfit(xc, yc, 1)
-        a_pow = math.exp(la2)
-        phi_pow = a_pow * (self.X ** bc)
-        Sp = np.sum((phi_pow - self.Y) ** 2)
-        self.results['Power'] = dict(coeff=[a_pow, bc], phi=phi_pow, S=Sp, R2=1 - Sp / S_tot)
+        cp, phip, Sp, R2p = power_approx(self.X, self.Y)
+        results['Power'] = (cp, phip, Sp, R2p, None)
 
-        # Определение лучшей аппроксимации по минимальному S
-        best = min(self.results.items(), key=lambda kv: kv[1]['S'])[0]
+        best = min(results.items(), key=lambda kv: kv[1][2])[0]
 
-        # Вывод результатов
-        self.textRes.clear()
-        for key, rus in FUNC_TYPES:
-            rct = self.results[key]
-            coeff_str = ', '.join(f"{c:.4g}" for c in rct['coeff'])
-            self.textRes.append(f"{rus}:\nКоэффициенты ({coeff_str}); S = {rct['S']:.4g}; R² = {rct['R2']:.4g}\n")
+        # Вывод
+        self.resultsText.clear()
+        for key, label in FUNC_TYPES:
+            coeff, phi, S, R2, r = results[key]
+            coeff_str = ', '.join(f"{c:.4g}" for c in coeff)
+            self.resultsText.append(f"{label}:\nКоэффициенты=({coeff_str}); S={S:.4g}; R²={R2:.4g}\n")
             if key == 'Linear':
-                self.textRes.append(f"Корреляция Пирсона r = {rct['r']:.4g}\n")
-        self.textRes.append(f"\nЛучшая аппроксимация: {dict(FUNC_TYPES)[best]}")
-        R2_best = self.results[best]['R2']
-        self.textRes.append(f"R² лучшей = {R2_best:.4g}")
-        if R2_best > 0.9:
-            self.textRes.append("Аппроксимация очень хорошая.")
-        elif R2_best > 0.7:
-            self.textRes.append("Аппроксимация хорошая.")
+                self.resultsText.append(f"Коэффициент корреляции Пирсона r = {r:.4g}\n")
+        self.resultsText.append(f"\nЛучшая аппроксимация: {dict(FUNC_TYPES)[best]}")
+        R2b = results[best][3]
+        self.resultsText.append(f"R² лучшей = {R2b:.4g}")
+        if R2b > 0.9:
+            self.resultsText.append("Аппроксимация очень хорошая.")
+        elif R2b > 0.7:
+            self.resultsText.append("Аппроксимация хорошая.")
         else:
-            self.textRes.append("Аппроксимация слабая.")
+            self.resultsText.append("Аппроксимация слабая.")
 
-        # Построение графиков
+        # График
         self.canvas.axes.clear()
         self.canvas.axes.scatter(self.X, self.Y, label='Данные')
-        xline = np.linspace(min(self.X), max(self.X), 200)
-        dx = (max(self.X) - min(self.X)) * 0.05
-        self.canvas.axes.set_xlim(min(self.X) - dx, max(self.X) + dx)
-        for key, rus in FUNC_TYPES:
-            rct = self.results[key]
+        xline = np.linspace(self.X.min(), self.X.max(), 200)
+        dx = (self.X.max() - self.X.min()) * 0.05
+        self.canvas.axes.set_xlim(self.X.min() - dx, self.X.max() + dx)
+        for key, label in FUNC_TYPES:
+            coeff, phi, S, R2, r = results[key]
             if key == 'Linear':
-                yline = rct['coeff'][0] * xline + rct['coeff'][1]
+                yline = coeff[0] * xline + coeff[1]
             elif key.startswith('Polynomial'):
-                yline = np.polyval(rct['coeff'], xline)
+                yline = np.polyval(coeff, xline)
             elif key == 'Exponential':
-                a, b = rct['coeff']
-                yline = a * np.exp(b * xline)
+                yline = coeff[0] * np.exp(coeff[1] * xline)
             elif key == 'Logarithmic':
-                a, b = rct['coeff']
-                yline = a + b * np.log(xline)
+                yline = coeff[0] + coeff[1] * np.log(xline)
             else:
-                a, b = rct['coeff']
-                yline = a * (xline ** b)
-            self.canvas.axes.plot(xline, yline, label=rus)
+                yline = coeff[0] * xline ** coeff[1]
+            self.canvas.axes.plot(xline, yline, label=label)
         self.canvas.axes.legend()
         self.canvas.axes.grid(True)
         self.canvas.draw()
@@ -206,6 +167,6 @@ class MainWindow(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    win = MainWindow()
-    win.show()
+    w = MainWindow()
+    w.show()
     sys.exit(app.exec_())
