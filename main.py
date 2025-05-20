@@ -121,14 +121,18 @@ class MainWindow(QMainWindow):
         cp, phip, Sp, R2p = power_approx(self.X, self.Y)
         results['Power'] = (cp, phip, Sp, R2p, None)
 
-        best = min(results.items(), key=lambda kv: kv[1][2])[0]
+        for key, (coeff, phi, S, R2, r) in results.items():
+            sigma = math.sqrt(S / N)
+            results[key] = (coeff, phi, S, R2, r, sigma)
+
+        best = min(results.items(), key=lambda kv: kv[1][5])[0]
 
         # Вывод
         self.resultsText.clear()
         for key, label in FUNC_TYPES:
-            coeff, phi, S, R2, r = results[key]
+            coeff, phi, S, R2, r, sigma = results[key]
             coeff_str = ', '.join(f"{c:.4g}" for c in coeff)
-            self.resultsText.append(f"{label}:\nКоэффициенты=({coeff_str}); S={S:.4g}; R²={R2:.4g}\n")
+            self.resultsText.append(f"{label}:\nКоэффициенты=({coeff_str}); σ={sigma:.4g}; R²={R2:.4g}\n")
             if key == 'Linear':
                 self.resultsText.append(f"Коэффициент корреляции Пирсона r = {r:.4g}\n")
         self.resultsText.append(f"\nЛучшая аппроксимация: {dict(FUNC_TYPES)[best]}")
@@ -154,7 +158,7 @@ class MainWindow(QMainWindow):
             self.canvas.axes.set_xlim(x_min - dx, x_max + dx)
 
             for key, label in FUNC_TYPES:
-                coeff, _, _, _, _ = results[key]
+                coeff, _, _, _, _, _ = results[key]
                 y_vals = []
                 if key == 'Linear':
                     a, b = coeff
