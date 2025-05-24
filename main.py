@@ -94,81 +94,101 @@ class MainWindow(QMainWindow):
                     ys.append(float(parts[1].replace(',', '.')))
                 except:
                     pass
-        self.X = np.array(xs);
-        self.Y = np.array(ys)
-
-        N = len(self.X)
+        self.X = xs
+        self.Y = ys
+        N = len(xs)
         if N < 7 or N > 12:
             QMessageBox.warning(self, 'Ошибка', 'Должно быть от 7 до 12 точек!')
             return
 
+        temp = {}
+        try:
+            c, phi, S, R2, r = linear_approx(xs, ys)
+            temp['Linear'] = (c, phi, S, R2, r)
+        except:
+            temp['Linear'] = None
+
+        for deg, key in [(2, 'Polynomial2'), (3, 'Polynomial3')]:
+            try:
+                c, phi, S, R2 = poly_approx(xs, ys, deg)
+                temp[key] = (c, phi, S, R2, None)
+            except:
+                temp[key] = None
+
+        if any(y > 0 for y in ys):
+            try:
+                c, phi, S, R2 = exponential_approx(xs, ys)
+                temp['Exponential'] = (c, phi, S, R2, None)
+            except:
+                temp['Exponential'] = None
+        else:
+            temp['Exponential'] = None
+
+        if any(x > 0 for x in xs):
+            try:
+                c, phi, S, R2 = log_approx(xs, ys)
+                temp['Logarithmic'] = (c, phi, S, R2, None)
+            except:
+                temp['Logarithmic'] = None
+        else:
+            temp['Logarithmic'] = None
+
+        if any(x > 0 and y > 0 for x, y in zip(xs, ys)):
+            try:
+                c, phi, S, R2 = power_approx(xs, ys)
+                temp['Power'] = (c, phi, S, R2, None)
+            except:
+                temp['Power'] = None
+        else:
+            temp['Power'] = None
+
         results = {}
+        for k, v in temp.items():
+            if v is not None:
+                coeff, phi, S, R2, r = v
+                sigma = math.sqrt(S / N)
+                results[k] = (coeff, phi, S, R2, r, sigma)
 
-        c1, phi1, S1, R21, r1 = linear_approx(self.X, self.Y)
-        results['Linear'] = (c1, phi1, S1, R21, r1)
-
-        c2, phi2, S2, R22 = poly_approx(self.X, self.Y, 2)
-        results['Polynomial2'] = (c2, phi2, S2, R22, None)
-        c3, phi3, S3, R23 = poly_approx(self.X, self.Y, 3)
-        results['Polynomial3'] = (c3, phi3, S3, R23, None)
-
-        ce, phie, Se, R2e = exponential_approx(self.X, self.Y)
-        results['Exponential'] = (ce, phie, Se, R2e, None)
-
-        cl, phil, Sl, R2l = log_approx(self.X, self.Y)
-        results['Logarithmic'] = (cl, phil, Sl, R2l, None)
-
-        cp, phip, Sp, R2p = power_approx(self.X, self.Y)
-        results['Power'] = (cp, phip, Sp, R2p, None)
-
-        for key, (coeff, phi, S, R2, r) in results.items():
-            sigma = math.sqrt(S / N)
-            results[key] = (coeff, phi, S, R2, r, sigma)
+        if not results:
+            QMessageBox.critical(self, 'Ошибка', 'Ни одна модель не применима!')
+            return
 
         best = min(results.items(), key=lambda kv: kv[1][5])[0]
 
-        # Вывод
         self.resultsText.clear()
         for key, label in FUNC_TYPES:
+            if key not in results:
+                self.resultsText.append(f"{label}: неприменимо")
+                continue
             coeff, phi, S, R2, r, sigma = results[key]
             coeff_str = ', '.join(f"{c:.4g}" for c in coeff)
-            self.resultsText.append(f"{label}:\nКоэффициенты=({coeff_str}); σ={sigma:.4g}; R²={R2:.4g}\n")
+            self.resultsText.append(
+                f"{label}:\n  Коэффициенты = ({coeff_str})\n  σ = {sigma:.9g}, R² = {R2:.4g}"
+            )
             if key == 'Linear':
-                self.resultsText.append(f"Коэффициент корреляции Пирсона r = {r:.4g}\n")
-        self.resultsText.append(f"\nЛучшая аппроксимация: {dict(FUNC_TYPES)[best]}")
-        R2b = results[best][3]
-        self.resultsText.append(f"R² лучшей = {R2b:.4g}")
-        if R2b > 0.9:
-            self.resultsText.append("Аппроксимация очень хорошая.")
-        elif R2b > 0.7:
-            self.resultsText.append("Аппроксимация хорошая.")
-        else:
-            self.resultsText.append("Аппроксимация слабая.")
+                self.resultsText.append(f"  r (Пирсон) = {r:.4g}")
+        self.resultsText.append(f"\nЛучшая по σ: {dict(FUNC_TYPES)[best]}")
 
-        # График
         try:
             self.canvas.axes.clear()
-            x_list = list(self.X)
-            y_list = list(self.Y)
-            self.canvas.axes.scatter(x_list, y_list, label='Данные')
-
-            x_min, x_max = min(x_list), max(x_list)
+            self.canvas.axes.scatter(xs, ys, label='Данные')
+            x_min, x_max = min(xs), max(xs)
             dx = (x_max - x_min) * 0.05 if x_max != x_min else 1
             x_vals = [x_min + i * (x_max - x_min) / 199 for i in range(200)]
             self.canvas.axes.set_xlim(x_min - dx, x_max + dx)
 
             for key, label in FUNC_TYPES:
-                coeff, _, _, _, _, _ = results[key]
-                y_vals = []
+                if key not in results:
+                    continue
+                coeff = results[key][0]
                 if key == 'Linear':
                     a, b = coeff
                     y_vals = [a * x + b for x in x_vals]
                 elif key in ('Polynomial2', 'Polynomial3'):
+                    y_vals = []
                     for x in x_vals:
-                        val = 0
-                        for j, c in enumerate(coeff):
-                            val += c * (x ** j)
-                        y_vals.append(val)
+                        v = sum(coeff[j] * (x ** j) for j in range(len(coeff)))
+                        y_vals.append(v)
                 elif key == 'Exponential':
                     a, b = coeff
                     y_vals = [a * math.exp(b * x) for x in x_vals]
@@ -179,7 +199,10 @@ class MainWindow(QMainWindow):
                     a, b = coeff
                     y_vals = [a * (x ** b) for x in x_vals]
 
-                self.canvas.axes.plot(x_vals, y_vals, label=label)
+                pts = [(x, y) for x, y in zip(x_vals, y_vals) if y is not None]
+                if pts:
+                    xs_p, ys_p = zip(*pts)
+                    self.canvas.axes.plot(xs_p, ys_p, label=label)
 
             self.canvas.axes.legend()
             self.canvas.axes.grid(True)
