@@ -15,8 +15,8 @@ Also an approximation graph is drawn and the choice of the best approximation is
 ### 🚀 Installation and Running
 - Clone the repository:
   ```bash
-  git clone https://github.com/urasha/Data_Approximator.git
-  cd Data_Approximator
+  git clone https://github.com/urasha/data-approximator.git
+  cd data-approximator
   ```
   
 - Install dependencies:
